@@ -8,7 +8,7 @@
  * Second developer : Minho Park
  * 
  * ======
- * Update date : 2022.04.04 by Minho Park
+ * Update date : 2022.03.16 by Yunho Han
  * ======
  */
 //* Header file for C++
@@ -137,141 +137,249 @@ namespace gazebo
     };
     GZ_REGISTER_MODEL_PLUGIN(rok3_plugin);
 }
-
-//* get TransformI0();
+//* getTransformIo()
 MatrixXd getTransformI0()
 {
     MatrixXd tmp_m(4,4);
     
-    tmp_m << 1, 0, 0 ,0, \
-                         0, 1, 0, 0, \
-                         0, 0, 1, 0, \
-                         0, 0, 0, 1;
+    
+    tmp_m = MatrixXd::Identity(4, 4);
+    
+    /*
+     tmp_m << 1, 0, 0, 0, \
+     *        0, 1, 0, 0, \
+     *        0, 0, 1, 0, \
+     *        0, 0, 0, 1;
+     */
+    
+    /*
+     tmp_m(0, 0) = 1; tmp(0, 1) = 0; ...
+     * ...
+     * ...
+     */
+    
     
     return tmp_m;
 }
 
-MatrixXd jointToTransform01(VectorXd q)
+MatrixXd jointToTransform01(VectorXd q) // Hip Yaw
 {
-    //* input    : q: generalized  coordinates, q = [q1; q2; q3]
-    //* output : tmp_m
+    //* q: generalized coordinates. q = [q1; q2; q3];
     MatrixXd tmp_m(4,4);
-    double qq = q(0);
+    double tmp_q = q(0);
     
-    tmp_m << cos(qq), 0, sin(qq) ,0, \
-                         0, 1, 0, 0, \
-                         -sin(qq), 0, cos(qq), 1, \
-                         0, 0, 0, 1;
+    tmp_m << cos(tmp_q), -sin(tmp_q), 0, 0, \
+             sin(tmp_q), cos(tmp_q), 0, 0.105, \
+             0, 0, 1, -0.1512, \
+             0, 0, 0, 1;
+    
+    
+    
+       
     
     return tmp_m;
 }
 
-MatrixXd jointToTransform12(VectorXd q)
+MatrixXd jointToTransform12(VectorXd q) // Hip Roll
 {
+    //* q: generalized coordinates. q = [q1; q2; q3];
     MatrixXd tmp_m(4,4);
-    double qq = q(1);
+    double tmp_q = q(1);
     
-    tmp_m << cos(qq), 0, sin(qq) ,0, \
-                         0, 1, 0, 0, \
-                         -sin(qq), 0, cos(qq), 1, \
-                         0, 0, 0, 1;
+    tmp_m << 1, 0, 0, 0, \
+             0, cos(tmp_q), -sin(tmp_q), 0, \
+             0, sin(tmp_q), cos(tmp_q), 0, \
+             0, 0, 0, 1;
+    
+       
     
     return tmp_m;
 }
 
-MatrixXd jointToTransform23(VectorXd q)
+MatrixXd jointToTransform23(VectorXd q) // Hip Pitch
 {
+    //* q: generalized coordinates. q = [q1; q2; q3];
     MatrixXd tmp_m(4,4);
-    double qq = q(2);
+    double tmp_q = q(2);
     
-    tmp_m << cos(qq), 0, sin(qq) ,0, \
-                         0, 1, 0, 0, \
-                         -sin(qq), 0, cos(qq), 1, \
-                         0, 0, 0, 1;
+    tmp_m << cos(tmp_q), 0, sin(tmp_q), 0, \
+             0, 1, 0, 0, \
+             -sin(tmp_q), 0, cos(tmp_q), 0, \
+             0, 0, 0, 1;
+    
+       
     
     return tmp_m;
 }
 
-MatrixXd getTransform3E()
+MatrixXd jointToTransform34(VectorXd q) // Knee Pitch
 {
+    //* q: generalized coordinates. q = [q1; q2; q3];
     MatrixXd tmp_m(4,4);
+    double tmp_q = q(3);
     
-    tmp_m << 1, 0, 0 ,0, \
-                         0, 1, 0, 0, \
-                         0, 0, 1, 1, \
-                         0, 0, 0, 1;
+    tmp_m << cos(tmp_q), 0, sin(tmp_q), 0, \
+             0, 1, 0, 0, \
+             -sin(tmp_q), 0, cos(tmp_q), -0.35, \
+             0, 0, 0, 1;
+    
+       
     
     return tmp_m;
 }
+
+MatrixXd jointToTransform45(VectorXd q) // Ankle Pitch
+{
+    //* q: generalized coordinates. q = [q1; q2; q3];
+    MatrixXd tmp_m(4,4);
+    double tmp_q = q(4);
+    
+    tmp_m << cos(tmp_q), 0, sin(tmp_q), 0, \
+             0, 1, 0, 0, \
+             -sin(tmp_q), 0, cos(tmp_q), -0.35, \
+             0, 0, 0, 1;
+    
+       
+    
+    return tmp_m;
+}
+
+MatrixXd jointToTransform56(VectorXd q) // Ankle Roll
+{
+    //* q: generalized coordinates. q = [q1; q2; q3];
+    MatrixXd tmp_m(4,4);
+    double tmp_q = q(5);
+    
+    tmp_m << 1, 0, 0, 0, \
+             0, cos(tmp_q), -sin(tmp_q), 0, \
+             0, sin(tmp_q), cos(tmp_q), 0, \
+             0, 0, 0, 1;
+    
+       
+    
+    return tmp_m;
+}
+
+MatrixXd getTransform6E() // Ankle Roll
+{
+    //* q: generalized coordinates. q = [q1; q2; q3];
+    MatrixXd tmp_m(4,4);
+    
+    tmp_m << 1, 0, 0, 0, \
+             0, 1, 0, 0, \
+             0, 0, 1, -0.09, \
+             0, 0, 0, 1;
+    
+       
+    
+    return tmp_m;
+}
+
+
 
 VectorXd jointToPosition(VectorXd q)
 {
-    VectorXd tmp_v = VectorXd::Zero(3);
     MatrixXd tmp_m(4,4);
+    Vector3d tmp_p;
     
-    tmp_m = getTransformI0()*jointToTransform01(q)*jointToTransform12(q)*jointToTransform23(q)*getTransform3E();
+    MatrixXd T_I0(4,4), T_01(4,4), T_12(4,4), T_23(4,4), T_34(4,4), T_45(4,4), T_56(4,4), T_6E(4,4);
     
-    tmp_v = tmp_m.block(0,3,3,1);
-    return tmp_v;
+    T_I0 = getTransformI0();
+    T_01 = jointToTransform01(q);
+    T_12 = jointToTransform12(q);
+    T_23 = jointToTransform23(q);
+    T_34 = jointToTransform34(q);
+    T_45 = jointToTransform45(q);
+    T_56 = jointToTransform56(q);
+    T_6E = getTransform6E();
+    
+    tmp_m = T_I0*T_01*T_12*T_23*T_34*T_45*T_56*T_6E;
+    
+    tmp_p = tmp_m.block(0, 3, 3, 1);
+    
+    return tmp_p;
+    
+    
 }
 
 MatrixXd jointToRotMat(VectorXd q)
 {
-    MatrixXd tmp_rm(3,3);
     MatrixXd tmp_m(4,4);
+    MatrixXd tmp_return(3,3);
+        
+    MatrixXd T_I0(4,4), T_01(4,4), T_12(4,4), T_23(4,4), T_34(4,4), T_45(4,4), T_56(4,4), T_6E(4,4);
     
-    tmp_m = getTransformI0()*jointToTransform01(q)*jointToTransform12(q)*jointToTransform23(q)*getTransform3E();
-   
-    tmp_rm = tmp_m.block<3,3>(0,0);
+    T_I0 = getTransformI0();
+    T_01 = jointToTransform01(q);
+    T_12 = jointToTransform12(q);
+    T_23 = jointToTransform23(q);
+    T_34 = jointToTransform34(q);
+    T_45 = jointToTransform45(q);
+    T_56 = jointToTransform56(q);
+    T_6E = getTransform6E();
     
-    return tmp_rm;
+    tmp_m = T_I0*T_01*T_12*T_23*T_34*T_45*T_56*T_6E;
+    
+    tmp_return = tmp_m.block(0, 0, 3, 3);
+    
+    return tmp_return;
 }
 
 VectorXd rotToEuler(MatrixXd rotMat)
 {
-     MatrixXd tmp_rm(3,3);
-     Vector3d EULER;
-     
-     tmp_rm = rotMat;
-     EULER(0) = atan2(tmp_rm(1,0),tmp_rm(0,0));
-     EULER(1) = atan2(tmp_rm(2,0),sqrt(tmp_rm(2,1)*tmp_rm(2,1) +tmp_rm(2,2)*tmp_rm(2,2)));
-     EULER(2) = atan2(tmp_rm(2,1),tmp_rm(2,2));
-     
-     return EULER;
+    double z = atan2(rotMat(1,0), rotMat(0,0));
+    double y = atan2(-rotMat(2,0), sqrt(rotMat(2,1)*rotMat(2,1) + rotMat(2,2)*rotMat(2,2)));
+    double x = atan2(rotMat(2,1), rotMat(2,2));
+    
+    Vector3d tmp_v(z, y, x);
+    return tmp_v;
 }
 
+
 //* Preparing RobotControl Practice
-void Practice(){
+void Practice()
+{
+    double deg2rad = PI / 180;
+    double rad2deg = 180 / PI;
+    MatrixXd T_I0(4,4), T_01(4,4), T_12(4,4), T_23(4,4), T_34(4,4), T_45(4,4), T_56(4,4), T_6E(4,4), T_IE(4,4);
+    VectorXd q(6);
+    q << 10*deg2rad, 20*deg2rad, 30*deg2rad, 40*deg2rad, 50*deg2rad, 60*deg2rad;
+    Vector3d pos, euler;
+    MatrixXd C_IE(3,3);
     
-    MatrixXd T_I0(4,4), T_3E(4,4), T_01(4,4), T_12(4,4), T_23(4,4), T_IE(4,4), C_IE(3,3);
-    Vector3d q = {30, 30, 30}, pos, euler;
-    q = q*PI/180;
-    
+    //Vector3d q(30, 30, 30);
     T_I0 = getTransformI0();
-    T_3E = getTransform3E();
     T_01 = jointToTransform01(q);
     T_12 = jointToTransform12(q);
     T_23 = jointToTransform23(q);
+    T_34 = jointToTransform34(q);
+    T_45 = jointToTransform45(q);
+    T_56 = jointToTransform56(q);
+    T_6E = getTransform6E();
     
-    T_IE = T_I0*T_01*T_12*T_23*T_3E;
+    T_IE = T_I0*T_01*T_12*T_23*T_34*T_45*T_56*T_6E;
     
     pos = jointToPosition(q);
     C_IE = jointToRotMat(q);
-    euler = rotToEuler(C_IE);
+    euler = rotToEuler(C_IE) * rad2deg;
     
-    std::cout << "Hello World" << std::endl;
     
-//    std::cout <<" T_I0 = "<<T_I0 <<std::endl;
-//    std::cout <<" T_3E = "<<T_3E <<std::endl;
-//    std::cout <<" T_01 = "<<T_01 <<std::endl;
-//    std::cout <<" T_12 = "<<T_12 <<std::endl;
-//    std::cout <<" T_23 = "<<T_23 <<std::endl;
-    std::cout <<" T_IE = "<<T_IE <<std::endl;
+    std::cout << "Hello World!" << std::endl;
+    std::cout << "T_I0 = " << T_I0 << std::endl;
+    std::cout << "T_01 = " << T_01 << std::endl;
+    std::cout << "T_12 = " << T_12 << std::endl;
+    std::cout << "T_23 = " << T_23 << std::endl;
+    std::cout << "T_34 = " << T_34 << std::endl;
+    std::cout << "T_45 = " << T_45 << std::endl;
+    std::cout << "T_45 = " << T_56 << std::endl;
+    std::cout << "T_6E = " << T_6E << std::endl;
+    std::cout << "T_IE = " << T_IE << std::endl;
     
-    std::cout <<" Position = "<< pos <<std::endl;
-    std::cout <<" C_IE = "<< C_IE <<std::endl;
-    std::cout <<" Euler = "<< euler <<std::endl;
-    
+    std::cout << std::endl;
+    std::cout << "Position = " << pos << std::endl;
+    std::cout << "C_IE = " << C_IE << std::endl;
+    std::cout << "Euler(ZYX) = " << euler << std::endl;
+
 }
 
 
@@ -280,6 +388,7 @@ void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*
     /*
      * Loading model data and initializing the system before simulation 
      */
+    
 
     //* model.sdf file based model data input to [physics::ModelPtr model] for gazebo simulation
     model = _model;
@@ -309,6 +418,8 @@ void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*
     //* setting for getting dt
     last_update_time = model->GetWorld()->GetSimTime();
     update_connection = event::Events::ConnectWorldUpdateBegin(boost::bind(&rok3_plugin::UpdateAlgorithm, this));
+    
+    
     Practice();
 
 }
@@ -501,4 +612,3 @@ void gazebo::rok3_plugin::SetJointPIDgain()
 
     joint[WST].Kd = 2.;
 }
-
