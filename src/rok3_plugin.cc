@@ -58,6 +58,9 @@ using namespace RigidBodyDynamics::Math;
 
 using namespace std;
 
+double deg2rad = PI / 180;
+double rad2deg = 180 / PI;
+
 
 namespace gazebo
 {
@@ -92,7 +95,7 @@ namespace gazebo
         physics::JointPtr LS, RS;
 
         //* Index setting for each joint
-        
+
         enum
         {
             WST = 0, LHY, LHR, LHP, LKN, LAP, LAR, RHY, RHR, RHP, RKN, RAP, RAR
@@ -138,152 +141,151 @@ namespace gazebo
     GZ_REGISTER_MODEL_PLUGIN(rok3_plugin);
 }
 //* getTransformIo()
+
 MatrixXd getTransformI0()
 {
-    MatrixXd tmp_m(4,4);
-    
-    
+    MatrixXd tmp_m(4, 4);
+
+
     tmp_m = MatrixXd::Identity(4, 4);
-    
+
     /*
      tmp_m << 1, 0, 0, 0, \
      *        0, 1, 0, 0, \
      *        0, 0, 1, 0, \
      *        0, 0, 0, 1;
      */
-    
+
     /*
      tmp_m(0, 0) = 1; tmp(0, 1) = 0; ...
      * ...
      * ...
      */
-    
-    
+
+
     return tmp_m;
 }
 
 MatrixXd jointToTransform01(VectorXd q) // Hip Yaw
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
-    MatrixXd tmp_m(4,4);
+    MatrixXd tmp_m(4, 4);
     double tmp_q = q(0);
-    
+
     tmp_m << cos(tmp_q), -sin(tmp_q), 0, 0, \
              sin(tmp_q), cos(tmp_q), 0, 0.105, \
              0, 0, 1, -0.1512, \
              0, 0, 0, 1;
-    
-    
-    
-       
-    
+
+
+
+
+
     return tmp_m;
 }
 
 MatrixXd jointToTransform12(VectorXd q) // Hip Roll
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
-    MatrixXd tmp_m(4,4);
+    MatrixXd tmp_m(4, 4);
     double tmp_q = q(1);
-    
+
     tmp_m << 1, 0, 0, 0, \
              0, cos(tmp_q), -sin(tmp_q), 0, \
              0, sin(tmp_q), cos(tmp_q), 0, \
              0, 0, 0, 1;
-    
-       
-    
+
+
+
     return tmp_m;
 }
 
 MatrixXd jointToTransform23(VectorXd q) // Hip Pitch
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
-    MatrixXd tmp_m(4,4);
+    MatrixXd tmp_m(4, 4);
     double tmp_q = q(2);
-    
+
     tmp_m << cos(tmp_q), 0, sin(tmp_q), 0, \
              0, 1, 0, 0, \
              -sin(tmp_q), 0, cos(tmp_q), 0, \
              0, 0, 0, 1;
-    
-       
-    
+
+
+
     return tmp_m;
 }
 
 MatrixXd jointToTransform34(VectorXd q) // Knee Pitch
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
-    MatrixXd tmp_m(4,4);
+    MatrixXd tmp_m(4, 4);
     double tmp_q = q(3);
-    
+
     tmp_m << cos(tmp_q), 0, sin(tmp_q), 0, \
              0, 1, 0, 0, \
              -sin(tmp_q), 0, cos(tmp_q), -0.35, \
              0, 0, 0, 1;
-    
-       
-    
+
+
+
     return tmp_m;
 }
 
 MatrixXd jointToTransform45(VectorXd q) // Ankle Pitch
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
-    MatrixXd tmp_m(4,4);
+    MatrixXd tmp_m(4, 4);
     double tmp_q = q(4);
-    
+
     tmp_m << cos(tmp_q), 0, sin(tmp_q), 0, \
              0, 1, 0, 0, \
              -sin(tmp_q), 0, cos(tmp_q), -0.35, \
              0, 0, 0, 1;
-    
-       
-    
+
+
+
     return tmp_m;
 }
 
 MatrixXd jointToTransform56(VectorXd q) // Ankle Roll
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
-    MatrixXd tmp_m(4,4);
+    MatrixXd tmp_m(4, 4);
     double tmp_q = q(5);
-    
+
     tmp_m << 1, 0, 0, 0, \
              0, cos(tmp_q), -sin(tmp_q), 0, \
              0, sin(tmp_q), cos(tmp_q), 0, \
              0, 0, 0, 1;
-    
-       
-    
+
+
+
     return tmp_m;
 }
 
 MatrixXd getTransform6E() // Ankle Roll
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
-    MatrixXd tmp_m(4,4);
-    
+    MatrixXd tmp_m(4, 4);
+
     tmp_m << 1, 0, 0, 0, \
              0, 1, 0, 0, \
              0, 0, 1, -0.09, \
              0, 0, 0, 1;
-    
-       
-    
+
+
+
     return tmp_m;
 }
 
-
-
 VectorXd jointToPosition(VectorXd q)
 {
-    MatrixXd tmp_m(4,4);
+    MatrixXd tmp_m(4, 4);
     Vector3d tmp_p;
-    
-    MatrixXd T_I0(4,4), T_01(4,4), T_12(4,4), T_23(4,4), T_34(4,4), T_45(4,4), T_56(4,4), T_6E(4,4);
-    
+
+    MatrixXd T_I0(4, 4), T_01(4, 4), T_12(4, 4), T_23(4, 4), T_34(4, 4), T_45(4, 4), T_56(4, 4), T_6E(4, 4);
+
     T_I0 = getTransformI0();
     T_01 = jointToTransform01(q);
     T_12 = jointToTransform12(q);
@@ -292,23 +294,23 @@ VectorXd jointToPosition(VectorXd q)
     T_45 = jointToTransform45(q);
     T_56 = jointToTransform56(q);
     T_6E = getTransform6E();
-    
-    tmp_m = T_I0*T_01*T_12*T_23*T_34*T_45*T_56*T_6E;
-    
+
+    tmp_m = T_I0 * T_01 * T_12 * T_23 * T_34 * T_45 * T_56*T_6E;
+
     tmp_p = tmp_m.block(0, 3, 3, 1);
-    
+
     return tmp_p;
-    
-    
+
+
 }
 
 MatrixXd jointToRotMat(VectorXd q)
 {
-    MatrixXd tmp_m(4,4);
-    MatrixXd tmp_return(3,3);
-        
-    MatrixXd T_I0(4,4), T_01(4,4), T_12(4,4), T_23(4,4), T_34(4,4), T_45(4,4), T_56(4,4), T_6E(4,4);
-    
+    MatrixXd tmp_m(4, 4);
+    MatrixXd tmp_return(3, 3);
+
+    MatrixXd T_I0(4, 4), T_01(4, 4), T_12(4, 4), T_23(4, 4), T_34(4, 4), T_45(4, 4), T_56(4, 4), T_6E(4, 4);
+
     T_I0 = getTransformI0();
     T_01 = jointToTransform01(q);
     T_12 = jointToTransform12(q);
@@ -317,36 +319,35 @@ MatrixXd jointToRotMat(VectorXd q)
     T_45 = jointToTransform45(q);
     T_56 = jointToTransform56(q);
     T_6E = getTransform6E();
-    
-    tmp_m = T_I0*T_01*T_12*T_23*T_34*T_45*T_56*T_6E;
-    
+
+    tmp_m = T_I0 * T_01 * T_12 * T_23 * T_34 * T_45 * T_56*T_6E;
+
     tmp_return = tmp_m.block(0, 0, 3, 3);
-    
+
     return tmp_return;
 }
 
 VectorXd rotToEuler(MatrixXd rotMat)
 {
-    double z = atan2(rotMat(1,0), rotMat(0,0));
-    double y = atan2(-rotMat(2,0), sqrt(rotMat(2,1)*rotMat(2,1) + rotMat(2,2)*rotMat(2,2)));
-    double x = atan2(rotMat(2,1), rotMat(2,2));
-    
+    double z = atan2(rotMat(1, 0), rotMat(0, 0));
+    double y = atan2(-rotMat(2, 0), sqrt(rotMat(2, 1) * rotMat(2, 1) + rotMat(2, 2) * rotMat(2, 2)));
+    double x = atan2(rotMat(2, 1), rotMat(2, 2));
+
     Vector3d tmp_v(z, y, x);
     return tmp_v;
 }
 
 
 //* Preparing RobotControl Practice
+
 void Practice()
 {
-    double deg2rad = PI / 180;
-    double rad2deg = 180 / PI;
-    MatrixXd T_I0(4,4), T_01(4,4), T_12(4,4), T_23(4,4), T_34(4,4), T_45(4,4), T_56(4,4), T_6E(4,4), T_IE(4,4);
+    MatrixXd T_I0(4, 4), T_01(4, 4), T_12(4, 4), T_23(4, 4), T_34(4, 4), T_45(4, 4), T_56(4, 4), T_6E(4, 4), T_IE(4, 4);
     VectorXd q(6);
-    q << 10*deg2rad, 20*deg2rad, 30*deg2rad, 40*deg2rad, 50*deg2rad, 60*deg2rad;
+    q << 10 * deg2rad, 20 * deg2rad, 30 * deg2rad, 40 * deg2rad, 50 * deg2rad, 60 * deg2rad;
     Vector3d pos, euler;
-    MatrixXd C_IE(3,3);
-    
+    MatrixXd C_IE(3, 3);
+
     //Vector3d q(30, 30, 30);
     T_I0 = getTransformI0();
     T_01 = jointToTransform01(q);
@@ -356,14 +357,14 @@ void Practice()
     T_45 = jointToTransform45(q);
     T_56 = jointToTransform56(q);
     T_6E = getTransform6E();
-    
-    T_IE = T_I0*T_01*T_12*T_23*T_34*T_45*T_56*T_6E;
-    
+
+    T_IE = T_I0 * T_01 * T_12 * T_23 * T_34 * T_45 * T_56*T_6E;
+
     pos = jointToPosition(q);
     C_IE = jointToRotMat(q);
-    euler = rotToEuler(C_IE) * rad2deg;
-    
-    
+    euler = rotToEuler(C_IE);// * rad2deg;
+
+
     std::cout << "Hello World!" << std::endl;
     std::cout << "T_I0 = " << T_I0 << std::endl;
     std::cout << "T_01 = " << T_01 << std::endl;
@@ -374,7 +375,7 @@ void Practice()
     std::cout << "T_45 = " << T_56 << std::endl;
     std::cout << "T_6E = " << T_6E << std::endl;
     std::cout << "T_IE = " << T_IE << std::endl;
-    
+
     std::cout << std::endl;
     std::cout << "Position = " << pos << std::endl;
     std::cout << "C_IE = " << C_IE << std::endl;
@@ -382,13 +383,12 @@ void Practice()
 
 }
 
-
 void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*/)
 {
     /*
      * Loading model data and initializing the system before simulation 
      */
-    
+
 
     //* model.sdf file based model data input to [physics::ModelPtr model] for gazebo simulation
     model = _model;
@@ -418,8 +418,8 @@ void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*
     //* setting for getting dt
     last_update_time = model->GetWorld()->GetSimTime();
     update_connection = event::Events::ConnectWorldUpdateBegin(boost::bind(&rok3_plugin::UpdateAlgorithm, this));
-    
-    
+
+
     Practice();
 
 }
@@ -443,7 +443,15 @@ void gazebo::rok3_plugin::UpdateAlgorithm()
 
     //* Read Sensors data
     GetjointData();
-    
+
+    //* Target Angles
+    joint[LHY].targetRadian = 10 * deg2rad;
+    joint[LHR].targetRadian = 20 * deg2rad;
+    joint[LHP].targetRadian = 30 * deg2rad;
+    joint[LKN].targetRadian = 40 * deg2rad;
+    joint[LAP].targetRadian = 50 * deg2rad;
+    joint[LAR].targetRadian = 60 * deg2rad;
+
     //* Joint Controller
     jointController();
 }
@@ -456,8 +464,8 @@ void gazebo::rok3_plugin::jointController()
 
     // Update target torque by control
     for (int j = 0; j < nDoF; j++) {
-        joint[j].targetTorque = joint[j].Kp * (joint[j].targetRadian-joint[j].actualRadian)\
-                              + joint[j].Kd * (joint[j].targetVelocity-joint[j].actualVelocity);
+        joint[j].targetTorque = joint[j].Kp * (joint[j].targetRadian - joint[j].actualRadian)\
+                              + joint[j].Kd * (joint[j].targetVelocity - joint[j].actualVelocity);
     }
 
     // Update target torque in gazebo simulation     
@@ -560,13 +568,13 @@ void gazebo::rok3_plugin::initializeJoint()
     /*
      * Initialize joint variables for joint control
      */
-    
+
     for (int j = 0; j < nDoF; j++) {
         joint[j].targetDegree = 0;
         joint[j].targetRadian = 0;
         joint[j].targetVelocity = 0;
         joint[j].targetTorque = 0;
-        
+
         joint[j].actualDegree = 0;
         joint[j].actualRadian = 0;
         joint[j].actualVelocity = 0;
