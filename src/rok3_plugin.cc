@@ -343,51 +343,6 @@ double cosWave(double amp, double period, double time, double int_pos)
 }
 
 
-//* Preparing RobotControl Practice
-
-void Practice()
-{
-    MatrixXd T_I0(4, 4), T_01(4, 4), T_12(4, 4), T_23(4, 4), T_34(4, 4), T_45(4, 4), T_56(4, 4), T_6E(4, 4), T_IE(4, 4);
-    VectorXd q(6);
-    q << 10 * deg2rad, 20 * deg2rad, 30 * deg2rad, 40 * deg2rad, 50 * deg2rad, 60 * deg2rad;
-    Vector3d pos, euler;
-    MatrixXd C_IE(3, 3);
-
-    //Vector3d q(30, 30, 30);
-    T_I0 = getTransformI0();
-    T_01 = jointToTransform01(q);
-    T_12 = jointToTransform12(q);
-    T_23 = jointToTransform23(q);
-    T_34 = jointToTransform34(q);
-    T_45 = jointToTransform45(q);
-    T_56 = jointToTransform56(q);
-    T_6E = getTransform6E();
-
-    T_IE = T_I0 * T_01 * T_12 * T_23 * T_34 * T_45 * T_56*T_6E;
-
-    pos = jointToPosition(q);
-    C_IE = jointToRotMat(q);
-    euler = rotToEuler(C_IE); // * rad2deg;
-
-
-    //    std::cout << "Hello World!" << std::endl;
-    //    std::cout << "T_I0 = " << T_I0 << std::endl;
-    //    std::cout << "T_01 = " << T_01 << std::endl;
-    //    std::cout << "T_12 = " << T_12 << std::endl;
-    //    std::cout << "T_23 = " << T_23 << std::endl;
-    //    std::cout << "T_34 = " << T_34 << std::endl;
-    //    std::cout << "T_45 = " << T_45 << std::endl;
-    //    std::cout << "T_56 = " << T_56 << std::endl;
-    //    std::cout << "T_6E = " << T_6E << std::endl;
-    //    std::cout << "T_IE = " << T_IE << std::endl;
-    //
-    //    std::cout << std::endl;
-    //    std::cout << "Position = " << pos << std::endl;
-    //    std::cout << "C_IE = " << C_IE << std::endl;
-    //    std::cout << "Euler(ZYX) = " << euler << std::endl;
-
-}
-
 MatrixXd jointToPosJac(VectorXd q)
 {
     // Input: vector of generalized coordinates (joint angles)
@@ -592,6 +547,84 @@ VectorXd rotMatToRotVec(MatrixXd C)
     return phi;
 }
 
+VectorXd inverseKinematics(Vector3d r_des, MatrixXd C_des, VectorXd q0, double tol)
+{
+    // Input: desired end-effector position, desired end-effector orientation, initial guess for joint angles, threshold for the stopping-criterion
+    // Output: joint angles which match desired end-effector position and orientation
+    double num_it;
+    MatrixXd J_P(3,6), J_R(3,6), J(6,6), pinvJ(6,6), C_err(3,3), C_IE(3,3);
+    VectorXd q(6),dq(6),dXe(6);
+    Vector3d dr, dph;
+    double lambda;
+    
+    //* Set maximum number of iterations
+    double max_it = 200;
+    
+    //* Initialize the solution with the initial guess
+    q=q0;
+    C_IE = jointToRotMat(q);
+    C_err = C_des*C_IE.transpose();
+    
+    //* Damping factor
+    lambda = 0.001;
+    
+    //* Initialize error
+    dr = r_des - jointToPosition(q);
+    dph = rotMatToRotVec(C_err);
+    dXe << dr(0), dr(1), dr(2), dph(0), dph(1), dph(2);
+    
+    ////////////////////////////////////////////////
+    //** Iterative inverse kinematics
+    ////////////////////////////////////////////////
+    
+    //* Iterate until terminating condition
+    while (num_it<max_it && dXe.norm()>tol)
+    {
+        
+        //Compute Inverse Jacobian
+        J_P = jointToPosJac(q);
+        J_R = jointToRotJac(q);
+
+        J.block(0,0,3,6) = J_P;
+        J.block(3,0,3,6) = J_R; // Geometric Jacobian
+        
+        // Convert to Geometric Jacobian to Analytic Jacobian
+        dq = pseudoInverseMat(J,lambda)*dXe;
+        
+        // Update law
+        q += 0.5*dq;
+        
+        // Update error
+        C_IE = jointToRotMat(q);
+        C_err = C_des*C_IE.transpose();
+        
+        dr = r_des - jointToPosition(q);
+        dph = rotMatToRotVec(C_err);
+        dXe << dr(0), dr(1), dr(2), dph(0), dph(1), dph(2);
+                   
+        num_it++;
+    }
+    std::cout << "iteration: " << num_it << std::endl << ", value (deg) : " << q*rad2deg << std::endl;
+    
+    return q;
+}
+
+//* Preparing RobotControl Practice
+
+void Practice()
+{
+    Vector3d r_des;
+    MatrixXd C_des;
+    VectorXd q(6),q_cal(6);
+    q << 10 * deg2rad, 20 * deg2rad, 30 * deg2rad, 40 * deg2rad, 50 * deg2rad, 60 * deg2rad;
+    
+    // q = [10;20;30;40;50;60]*pi/180;
+        r_des = jointToPosition(q);
+        C_des = jointToRotMat(q);
+        
+        q_cal = inverseKinematics(r_des, C_des, q*0.5, 0.001);
+}
+
 void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*/)
 {
     /*
@@ -629,28 +662,23 @@ void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*
     update_connection = event::Events::ConnectWorldUpdateBegin(boost::bind(&rok3_plugin::UpdateAlgorithm, this));
 
 
-    //    Practice();
-
-    VectorXd q(6);
-    VectorXd q_init(6);
-    q << 10 * deg2rad, 20 * deg2rad, 30 * deg2rad, 40 * deg2rad, 50 * deg2rad, 60 * deg2rad;
-    q_init = 0.5*q;
+        Practice();
 
     //    jointToPosJac(q);
     //    jointToRotJac(q);
     
-    jointToJacobian(q);
+//    jointToJacobian(q);
+//    
+//    pseudoInverseMat(jointToJacobian(q),0.001);
+//    
+//    MatrixXd C_des  = jointToRotMat(q);
+//    MatrixXd C_init = jointToRotMat(q_init);
+//    
+//    MatrixXd C_err = C_des*C_init.transpose();
+//    
+//    VectorXd dph = rotMatToRotVec(C_err);
     
-    pseudoInverseMat(jointToJacobian(q),0.001);
-    
-    MatrixXd C_des  = jointToRotMat(q);
-    MatrixXd C_init = jointToRotMat(q_init);
-    
-    MatrixXd C_err = C_des*C_init.transpose();
-    
-    VectorXd dph = rotMatToRotVec(C_err);
-    
-    std::cout << "dph : " << dph << std::endl;
+//    std::cout << "dph : " << dph << std::endl;
 }
 
 void gazebo::rok3_plugin::UpdateAlgorithm()
