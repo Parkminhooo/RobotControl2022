@@ -22,11 +22,16 @@
     <include>
       <uri>model://sun</uri>
     </include>
+    
+    <include>
+      <uri>model://robocup_3Dsim_ball</uri>
+      <pose frame=''>1 0 0.11 0 0 0</pose>
+    </include>
  
     <include>
       <uri>model://rok3_model</uri>
       <pose frame=''>0 0 0.947 0 0 0</pose>
-      <plugin name="rok3_plugin" filename="librok3_study_pkgs.so"/> 
+      <plugin name="rok3_plugin" filename="librok3_study_pkgs.so"/>
     </include>
   </world>
 </sdf>

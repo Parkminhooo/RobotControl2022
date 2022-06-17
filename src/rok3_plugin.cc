@@ -6,14 +6,14 @@
  * Master : BKCho
  * First developer : Yunho Han
  * Second developer : Minho Park
- * 
+ * #include <iostream>
+
  * ======
  * Update date : 2022.03.16 by Yunho Han
  * ======
  */
 //* Header file for C++
 #include <stdio.h>
-#include <iostream>
 #include <boost/bind.hpp>
 
 //* Header file for Gazebo and Ros
@@ -61,9 +61,10 @@ using namespace std;
 double deg2rad = PI / 180;
 double rad2deg = 180 / PI;
 
-Vector3d r_des;
+Vector3d r_des, l_r_des, r_r_des;
 MatrixXd C_des;
-VectorXd q_cal(6), q_init(6);
+Matrix3d L_C_des, L_C_predes, R_C_predes, R_C_des;
+VectorXd q_cal(12), q_init(6), l_q_cal(6), r_q_cal(6), l_q_init(6), r_q_init(6);
 
 
 //// init des_q
@@ -133,12 +134,23 @@ namespace gazebo
         } ROBO_JOINT;
         ROBO_JOINT* joint;
 
+        //*ROS publisher
+        ros::Publisher L_R_DES_Z;
+
+        std_msgs::Float32MultiArray l_r_des_z;
+
+        ros::NodeHandle nh;
+
+
+
+
     public:
         //*** Functions for RoK-3 Simulation in Gazebo ***//
         void Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*/); // Loading model data and initializing the system before simulation 
         void UpdateAlgorithm(); // Algorithm update while simulation
 
         void jointController(); // Joint Controller for each joint
+        void ROSMsgPublish();
 
         void GetJoints(); // Get each joint data from [physics::ModelPtr _model]
         void GetjointData(); // Get encoder data of each joint
@@ -174,20 +186,25 @@ MatrixXd getTransformI0()
     return tmp_m;
 }
 
-MatrixXd jointToTransform01(VectorXd q) // Hip Yaw
+MatrixXd jointToTransform01(VectorXd q, std::string dir = "left") // Hip Yaw
 {
     //* q: generalized coordinates. q = [q1; q2; q3];
     MatrixXd tmp_m(4, 4);
     double tmp_q = q(0);
 
-    tmp_m << cos(tmp_q), -sin(tmp_q), 0, 0, \
+    std::string L_R_step = dir;
+    if (L_R_step == "left") {
+        tmp_m << cos(tmp_q), -sin(tmp_q), 0, 0, \
              sin(tmp_q), cos(tmp_q), 0, 0.105, \
              0, 0, 1, -0.1512, \
              0, 0, 0, 1;
-
-
-
-
+    }
+    else if (L_R_step == "right") {
+        tmp_m << cos(tmp_q), -sin(tmp_q), 0, 0, \
+             sin(tmp_q), cos(tmp_q), 0, -0.105, \
+             0, 0, 1, -0.1512, \
+             0, 0, 0, 1;
+    }
 
     return tmp_m;
 }
@@ -203,8 +220,6 @@ MatrixXd jointToTransform12(VectorXd q) // Hip Roll
              0, sin(tmp_q), cos(tmp_q), 0, \
              0, 0, 0, 1;
 
-
-
     return tmp_m;
 }
 
@@ -218,8 +233,6 @@ MatrixXd jointToTransform23(VectorXd q) // Hip Pitch
              0, 1, 0, 0, \
              -sin(tmp_q), 0, cos(tmp_q), 0, \
              0, 0, 0, 1;
-
-
 
     return tmp_m;
 }
@@ -287,15 +300,21 @@ MatrixXd getTransform6E() // Ankle Roll
     return tmp_m;
 }
 
-VectorXd jointToPosition(VectorXd q)
+VectorXd jointToPosition(VectorXd q, std::string dir = "left")
 {
     MatrixXd tmp_m(4, 4);
     Vector3d tmp_p;
 
     MatrixXd T_I0(4, 4), T_01(4, 4), T_12(4, 4), T_23(4, 4), T_34(4, 4), T_45(4, 4), T_56(4, 4), T_6E(4, 4);
+    std::string L_R_step = dir;
 
     T_I0 = getTransformI0();
-    T_01 = jointToTransform01(q);
+    if (L_R_step == "left") {
+        T_01 = jointToTransform01(q);
+    }
+    else if (L_R_step == "right") {
+        T_01 = jointToTransform01(q, "right");
+    }
     T_12 = jointToTransform12(q);
     T_23 = jointToTransform23(q);
     T_34 = jointToTransform34(q);
@@ -312,15 +331,21 @@ VectorXd jointToPosition(VectorXd q)
 
 }
 
-MatrixXd jointToRotMat(VectorXd q)
+MatrixXd jointToRotMat(VectorXd q, std::string dir = "left")
 {
     MatrixXd tmp_m(4, 4);
     MatrixXd tmp_return(3, 3);
 
     MatrixXd T_I0(4, 4), T_01(4, 4), T_12(4, 4), T_23(4, 4), T_34(4, 4), T_45(4, 4), T_56(4, 4), T_6E(4, 4);
 
+    std::string L_R_step = dir;
     T_I0 = getTransformI0();
-    T_01 = jointToTransform01(q);
+    if (L_R_step == "left") {
+        T_01 = jointToTransform01(q);
+    }
+    else if (L_R_step == "right") {
+        T_01 = jointToTransform01(q, "right");
+    }
     T_12 = jointToTransform12(q);
     T_23 = jointToTransform23(q);
     T_34 = jointToTransform34(q);
@@ -348,22 +373,22 @@ VectorXd rotToEuler(MatrixXd rotMat)
 double func_1_cos(double t, double init, double final_, double T)
 {
     double des;
-    double f = 1 / 2 / T;
+    double omega = PI / T;
+    des = (final_ - init) * 0.5 * (1 - cos(omega * t)) + init;
 
-    des = (final_ - init)*0.5 * (1 - cos(2 * PI * f * t));
     return des;
 }
 
 double cosWave(double amp, double period, double time, double init_pos)
 {
-    //amp : final value
-    //period
+    //amp : (final - init) value
+    //period : time period
     //time : current time
     //init_pos : init value
-    return (amp / 2)*(1 - cos(PI / period * time)) + init_pos;
+    return (amp - init_pos) *0.5 * (1 - cos(PI / period * time)) + init_pos;
 }
 
-MatrixXd jointToPosJac(VectorXd q)
+MatrixXd jointToPosJac(VectorXd q, std::string dir = "left")
 {
     // Input: vector of generalized coordinates (joint angles)
     // Output: J_P, Jacobian of the end-effector translation which maps joint velocities to end-effector linear velocities in I frame.
@@ -376,9 +401,15 @@ MatrixXd jointToPosJac(VectorXd q)
     Vector3d n_I_1, n_I_2, n_I_3, n_I_4, n_I_5, n_I_6;
     Vector3d r_I_IE;
 
+    std::string L_R_step = dir;
     //* Compute the relative homogeneous transformation matrices.
     T_I0 = getTransformI0();
-    T_01 = jointToTransform01(q);
+    if (L_R_step == "left") {
+        T_01 = jointToTransform01(q);
+    }
+    else if (L_R_step == "right") {
+        T_01 = jointToTransform01(q, "right");
+    }
     T_12 = jointToTransform12(q);
     T_23 = jointToTransform23(q);
     T_34 = jointToTransform34(q);
@@ -443,7 +474,7 @@ MatrixXd jointToPosJac(VectorXd q)
     return J_P;
 }
 
-MatrixXd jointToRotJac(VectorXd q)
+MatrixXd jointToRotJac(VectorXd q, std::string dir = "left")
 {
     // Input: vector of generalized coordinates (joint angles)
     // Output: J_R, Jacobian of the end-effector orientation which maps joint velocities to end-effector angular velocities in I frame.
@@ -453,9 +484,15 @@ MatrixXd jointToRotJac(VectorXd q)
     MatrixXd R_I1(3, 3), R_I2(3, 3), R_I3(3, 3), R_I4(3, 3), R_I5(3, 3), R_I6(3, 3);
     Vector3d n_1, n_2, n_3, n_4, n_5, n_6;
 
+    std::string L_R_step = dir;
     //* Compute the relative homogeneous transformation matrices.
     T_I0 = getTransformI0();
-    T_01 = jointToTransform01(q);
+    if (L_R_step == "left") {
+        T_01 = jointToTransform01(q);
+    }
+    else if (L_R_step == "right") {
+        T_01 = jointToTransform01(q);
+    }
     T_12 = jointToTransform12(q);
     T_23 = jointToTransform23(q);
     T_34 = jointToTransform34(q);
@@ -500,11 +537,18 @@ MatrixXd jointToRotJac(VectorXd q)
     return J_R;
 }
 
-MatrixXd jointToJacobian(VectorXd q)
+MatrixXd jointToJacobian(VectorXd q, std::string dir = "left")
 {
     MatrixXd J = MatrixXd::Zero(6, 6);
-    J << jointToPosJac(q),
-            jointToRotJac(q);
+    std::string L_R_step = dir;
+    if (L_R_step == "left") {
+        J << jointToPosJac(q),
+                jointToRotJac(q);
+    }
+    else if (L_R_step == "right") {
+        J << jointToPosJac(q, "right"),
+                jointToRotJac(q, "right");
+    }
     std::cout << "geometric Jacobian : " << J << std::endl;
     return J;
 }
@@ -566,8 +610,98 @@ VectorXd rotMatToRotVec(MatrixXd C)
 
     return phi;
 }
+//
+//VectorXd inverseKinematics(Vector3d L_r_des, MatrixXd L_C_des, Vector3d R_r_des, MatrixXd R_C_des, VectorXd L_q0, VectorXd R_q0, double tol)
+//{
+//    // Input: desired end-effector position, desired end-effector orientation, initial guess for joint angles, threshold for the stopping-criterion
+//    // Output: joint angles which match desired end-effector position and orientation
+//    double num_it;
+//    MatrixXd J_P(3, 6), J_R(3, 6), J(6, 6), pinvJ(6, 6), C_err(3, 3), C_IE(3, 3);
+//    MatrixXd L_J_P(3, 6), L_J_R(3, 6), L_J(6, 6), L_pinvJ(6, 6), L_C_err(3, 3), L_C_IE(3, 3);
+//    MatrixXd R_J_P(3, 6), R_J_R(3, 6), R_J(6, 6), R_pinvJ(6, 6), R_C_err(3, 3), R_C_IE(3, 3);
+//    VectorXd q(12), dq(6), dXe(6), L_q(6), R_q(6), L_dq(6), R_dq(6), L_dXe(6), R_dXe(6);
+//    Vector3d dr, dph, L_dr, L_dph, R_dr, R_dph;
+//    double lambda;
+//
+//    //* Set maximum number of iterations
+//    double max_it = 200;
+//
+//    //* Initialize the solution with the initial guess
+//    L_q = L_q0;
+//    R_q = R_q0;
+//
+//
+//    L_C_IE = jointToRotMat(L_q);
+//    R_C_IE = jointToRotMat(R_q, "right");
+//
+//    L_C_err = L_C_des * L_C_IE.transpose();
+//    R_C_err = R_C_des * R_C_IE.transpose();
+//
+//    //* Damping factor
+//    lambda = 0.001;
+//
+//    //* Initialize error
+//    L_dr = L_r_des - jointToPosition(L_q);
+//    R_dr = R_r_des - jointToPosition(R_q, "right");
+//
+//    L_dph = rotMatToRotVec(L_C_err);
+//    R_dph = rotMatToRotVec(R_C_err);
+//
+//    L_dXe << L_dr(0), L_dr(1), L_dr(2), L_dph(0), L_dph(1), L_dph(2);
+//    R_dXe << R_dr(0), R_dr(1), R_dr(2), R_dph(0), R_dph(1), R_dph(2);
+//
+//    ////////////////////////////////////////////////
+//    //** Iterative inverse kinematics
+//    ////////////////////////////////////////////////
+//
+//    //* Iterate until terminating condition
+//    while ((num_it < max_it) && (L_dXe.norm() > tol) && (R_dXe.norm() > tol)) {
+//
+//        //Compute Inverse Jacobian
+//        L_J_P = jointToPosJac(L_q);
+//        L_J_R = jointToRotJac(L_q);
+//
+//        R_J_P = jointToPosJac(R_q, "right");
+//        R_J_R = jointToRotJac(R_q, "right");
+//
+//        L_J.block(0, 0, 3, 6) = L_J_P;
+//        L_J.block(3, 0, 3, 6) = L_J_R; // Geometric Jacobian
+//
+//        R_J.block(0, 0, 3, 6) = R_J_P;
+//        R_J.block(3, 0, 3, 6) = R_J_R; // Geometric Jacobian
+//
+//        // Convert to Geometric Jacobian to Analytic Jacobian
+//        L_dq = pseudoInverseMat(L_J, lambda) * L_dXe;
+//        R_dq = pseudoInverseMat(R_J, lambda) * R_dXe;
+//
+//        // Update law
+//        L_q += 0.5 * L_dq;
+//        R_q += 0.5 * R_dq;
+//
+//        // Update error
+//        L_C_IE = jointToRotMat(L_q);
+//        L_C_err = L_C_des * L_C_IE.transpose();
+//
+//        L_dr = L_r_des - jointToPosition(L_q);
+//        L_dph = rotMatToRotVec(L_C_err);
+//        L_dXe << L_dr(0), L_dr(1), L_dr(2), L_dph(0), L_dph(1), L_dph(2);
+//
+//        R_C_IE = jointToRotMat(R_q, "right");
+//        R_C_err = R_C_des * R_C_IE.transpose();
+//
+//        R_dr = R_r_des - jointToPosition(R_q, "right");
+//        R_dph = rotMatToRotVec(R_C_err);
+//        R_dXe << R_dr(0), R_dr(1), R_dr(2), R_dph(0), R_dph(1), R_dph(2);
+//
+//        num_it++;
+//        q << L_q, R_q;
+//    }
+//    //        std::cout << "iteration: " << num_it << std::endl << ", value (deg) : " << q * rad2deg << std::endl;
+//
+//    return q;
+//}
 
-VectorXd inverseKinematics(Vector3d r_des, MatrixXd C_des, VectorXd q0, double tol)
+VectorXd inverseKinematics(Vector3d r_des, MatrixXd C_des, VectorXd q0, double tol, std::string dir = "left")
 {
     // Input: desired end-effector position, desired end-effector orientation, initial guess for joint angles, threshold for the stopping-criterion
     // Output: joint angles which match desired end-effector position and orientation
@@ -576,20 +710,31 @@ VectorXd inverseKinematics(Vector3d r_des, MatrixXd C_des, VectorXd q0, double t
     VectorXd q(6), dq(6), dXe(6);
     Vector3d dr, dph;
     double lambda;
+    std::string L_R_step = dir;
 
     //* Set maximum number of iterations
     double max_it = 200;
 
     //* Initialize the solution with the initial guess
     q = q0;
-    C_IE = jointToRotMat(q);
+    if (L_R_step == "left") {
+        C_IE = jointToRotMat(q);
+    }
+    else if (L_R_step == "right") {
+        C_IE = jointToRotMat(q, "right");
+    }
     C_err = C_des * C_IE.transpose();
 
     //* Damping factor
     lambda = 0.001;
 
     //* Initialize error
-    dr = r_des - jointToPosition(q);
+    if (L_R_step == "left") {
+        dr = r_des - jointToPosition(q);
+    }
+    else if (L_R_step == "right") {
+        dr = r_des - jointToPosition(q, "right");
+    }
     dph = rotMatToRotVec(C_err);
     dXe << dr(0), dr(1), dr(2), dph(0), dph(1), dph(2);
 
@@ -601,8 +746,15 @@ VectorXd inverseKinematics(Vector3d r_des, MatrixXd C_des, VectorXd q0, double t
     while (num_it < max_it && dXe.norm() > tol) {
 
         //Compute Inverse Jacobian
-        J_P = jointToPosJac(q);
-        J_R = jointToRotJac(q);
+        if (L_R_step == "left") {
+            J_P = jointToPosJac(q);
+            J_R = jointToRotJac(q);
+        }
+        else if (L_R_step == "right") {
+            J_P = jointToPosJac(q, "right");
+            J_R = jointToRotJac(q, "right");
+        }
+
 
         J.block(0, 0, 3, 6) = J_P;
         J.block(3, 0, 3, 6) = J_R; // Geometric Jacobian
@@ -614,16 +766,26 @@ VectorXd inverseKinematics(Vector3d r_des, MatrixXd C_des, VectorXd q0, double t
         q += 0.5 * dq;
 
         // Update error
-        C_IE = jointToRotMat(q);
-        C_err = C_des * C_IE.transpose();
+        if (L_R_step == "left") {
+            C_IE = jointToRotMat(q);
+            C_err = C_des * C_IE.transpose();
 
-        dr = r_des - jointToPosition(q);
-        dph = rotMatToRotVec(C_err);
-        dXe << dr(0), dr(1), dr(2), dph(0), dph(1), dph(2);
+            dr = r_des - jointToPosition(q);
+            dph = rotMatToRotVec(C_err);
+            dXe << dr(0), dr(1), dr(2), dph(0), dph(1), dph(2);
+        }
+        else if (L_R_step == "right") {
+            C_IE = jointToRotMat(q, "right");
+            C_err = C_des * C_IE.transpose();
+
+            dr = r_des - jointToPosition(q, "right");
+            dph = rotMatToRotVec(C_err);
+            dXe << dr(0), dr(1), dr(2), dph(0), dph(1), dph(2);
+        }
 
         num_it++;
     }
-    //    std::cout << "iteration: " << num_it << std::endl << ", value (deg) : " << q * rad2deg << std::endl;
+    //    std::cout << "iteration: " << num_it << std::endl; // << ", value (deg) : " << q * rad2deg << std::endl;
 
     return q;
 }
@@ -642,7 +804,7 @@ void Practice()
     r_des << 0, 0.105, -0.55;
     C_des = MatrixXd::Identity(3, 3);
 
-    q_cal = inverseKinematics(r_des, C_des, q_init, 0.001);
+    //    q_cal = inverseKinematics(r_des, C_des, q_init, 0.001);
     des_q = q_cal;
     std::cout << "q_cal : " << q_cal * rad2deg << std::endl;
 }
@@ -652,6 +814,9 @@ void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*
     /*
      * Loading model data and initializing the system before simulation 
      */
+
+    L_R_DES_Z = nh.advertise<std_msgs::Float32MultiArray>("l_r_des_z", 1000);
+    l_r_des_z.data.resize(1);
 
 
     //* model.sdf file based model data input to [physics::ModelPtr model] for gazebo simulation
@@ -684,7 +849,7 @@ void gazebo::rok3_plugin::Load(physics::ModelPtr _model, sdf::ElementPtr /*_sdf*
     update_connection = event::Events::ConnectWorldUpdateBegin(boost::bind(&rok3_plugin::UpdateAlgorithm, this));
 
 
-    Practice();
+    //    Practice();
 
     //    jointToPosJac(q);
     //    jointToRotJac(q);
@@ -726,87 +891,771 @@ void gazebo::rok3_plugin::UpdateAlgorithm()
     //* Read Sensors data
     GetjointData();
 
-    //practice 6
-    static double time_ = 0;
-    if (time == 0.001) {
-        q_init << 0 * deg2rad, 0 * deg2rad, -30 * deg2rad, 60 * deg2rad, -30 * deg2rad, 0 * deg2rad;
-        // q = [10;20;30;40;50;60]*pi/180;
-        r_des << 0, 0.105, -0.55;
-        C_des = MatrixXd::Identity(3, 3);
-        q_cal = inverseKinematics(r_des, C_des, q_init, 0.001);
+    //Walk Ready
+    if (time <= 5.) {
+        if (time == 0.001) {
+            q_init << 0 * deg2rad, 0 * deg2rad, -30 * deg2rad, 60 * deg2rad, -30 * deg2rad, 0 * deg2rad;
+            // q = [10;20;30;40;50;60]*pi/180;
+            l_r_des << 0, 0.105, -0.75;
+            r_r_des << 0, -0.105, -0.75;
+            C_des = MatrixXd::Identity(3, 3);
+
+            l_q_cal = inverseKinematics(l_r_des, C_des, q_init, 0.001);
+            r_q_cal = inverseKinematics(r_r_des, C_des, q_init, 0.001, "right");
+
+            std::cout << "Walk Ready Angle" << std::endl;
+            std::cout << "l_q_cal : " << l_q_cal << std::endl;
+            std::cout << "r_q_cal : " << r_q_cal << std::endl;
+        }
+    }
+        //Front Walk 3 steps.
+        //Move com right
+    else if (time <= 6) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(1) = cosWave(0.21, 1, time_, 0.105);
+        r_r_des(1) = cosWave(0, 1, time_, -0.105);
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+
     }
 
-    else if (time == 5) {
-        q_init = q_cal;
-        r_des << 0, 0.105, -0.35;
+        //Swing left leg
+    else if (time <= 8.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
 
-        q_cal = inverseKinematics(r_des, C_des, q_init, 0.001);
+        l_r_des(0) = cosWave(0.2, 2.5, time_, 0);
+        l_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+
     }
 
-    else if (time == 10) {
+        //Move CoM front, left
+    else if (time <= 11) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
 
-        //Inv_k
-        MatrixXd tmp_m = MatrixXd::Zero(3, 3);
+        l_r_des(0) = cosWave(0, 2.5, time_, 0.2);
+        l_r_des(1) = cosWave(0, 2.5, time_, 0.21);
+        l_r_des(2) = -0.75;
 
-        float q = 90 * PI / 180;
-        q_init = q_cal;
-        r_des << 0, 0.105, -0.35;
+        r_r_des(0) = cosWave(-0.2, 2.5, time_, 0);
+        r_r_des(1) = cosWave(-0.21, 2.5, time_, 0);
+        r_r_des(2) = -0.75;
 
-        tmp_m(0, 0) = cos(q);
-        tmp_m(0, 1) = -sin(q);
-        tmp_m(0, 2) = 0;
-        tmp_m(1, 0) = sin(q);
-        tmp_m(1, 1) = cos(q);
-        tmp_m(1, 2) = 0;
-        tmp_m(2, 0) = 0;
-        tmp_m(2, 1) = 0;
-        tmp_m(2, 2) = 1;
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
 
-        C_des = tmp_m;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
 
-        q_cal = inverseKinematics(r_des, C_des, q_init, 0.001);
     }
 
-    std::cout << "q_cal" << q_cal * rad2deg << std::endl;
+        //Swing right leg
+    else if (time <= 13.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.02, 2.5, time_, 0);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = cosWave(0.2, 2.5, time_, -0.2);
+        r_r_des(1) = cosWave(-0.19, 2.5, time_, -0.21);
+        r_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+
+    }
+
+        //Move CoM front,right
+    else if (time <= 16) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = cosWave(-0.2, 2.5, time_, 0);
+        l_r_des(1) = cosWave(0.21, 2.5, time_, 0.02);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = cosWave(0, 2.5, time_, 0.2);
+        r_r_des(1) = cosWave(0, 2.5, time_, -0.19);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Swing left leg
+    else if (time <= 18.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = cosWave(0, 2.5, time_, -0.2);
+        l_r_des(1) = 0.21;
+        l_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        r_r_des(0) = 0;
+        r_r_des(1) = 0;
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Move CoM center
+    else if (time <= 19.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.105, 1, time_, 0.21);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.105, 1, time_, 0);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Turn 90 deg
+        //First turn
+        //Move CoM right
+    else if (time <= 20.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.21, 1, time_, 0.105);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(0, 1, time_, -0.105);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //left leg 30 deg turn
+    else if (time <= 23) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = 0.21;
+        l_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        r_r_des(0) = 0;
+        r_r_des(1) = 0;
+        r_r_des(2) = -0.75;
+
+        L_C_predes << cosWave(cos(30 * deg2rad), 2.5, time_, cos(0)), cosWave(-sin(30 * deg2rad), 2.5, time_, -sin(0)), 0, \
+                                cosWave(sin(30 * deg2rad), 2.5, time_, sin(0)), cosWave(cos(30 * deg2rad), 2.5, time_, cos(0)), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Move CoM left
+    else if (time <= 24) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0, 1, time_, 0.21);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.21, 1, time_, 0);
+        r_r_des(2) = -0.75;
+
+        L_C_predes << cos(30 * deg2rad), -sin(30 * deg2rad), 0, \
+                                sin(30 * deg2rad), cos(30 * deg2rad), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Swing right leg
+    else if (time <= 26.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(-0.05, 2.5, time_, 0);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.26, 2.5, time_, -0.21);
+        r_r_des(2) = cosWave(-0.65, 2.5, time_, -0.75);
+
+        L_C_predes << cosWave(cos(0 * deg2rad), 2.5, time_, cos(30 * deg2rad)), cosWave(-sin(0 * deg2rad), 2.5, time_, -sin(30 * deg2rad)), 0, \
+                                cosWave(sin(0 * deg2rad), 2.5, time_, sin(30 * deg2rad)), cosWave(cos(0 * deg2rad), 2.5, time_, cos(30 * deg2rad)), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //right foot down
+    else if (time <= 27.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = -0.05;
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = -0.26;
+        r_r_des(2) = cosWave(-0.75, 1, time_, -0.65);
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Second Turn (same move as the first motion.)
+    else if (time <= 30) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.21, 2.5, time_, -0.05);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(0, 2.5, time_, -0.26);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 32.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.26, 2.5, time_, 0.21);
+        l_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(0.05, 2.5, time_, 0);
+        r_r_des(2) = -0.75;
+
+        L_C_predes << cosWave(cos(30 * deg2rad), 2.5, time_, cos(0)), cosWave(-sin(30 * deg2rad), 2.5, time_, -sin(0)), 0, \
+                                cosWave(sin(30 * deg2rad), 2.5, time_, sin(0)), cosWave(cos(30 * deg2rad), 2.5, time_, cos(0)), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 35) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0, 2.5, time_, 0.26);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.21, 2.5, time_, 0.05);
+        r_r_des(2) = -0.75;
+
+        L_C_predes << cos(30 * deg2rad), -sin(30 * deg2rad), 0, \
+                                sin(30 * deg2rad), cos(30 * deg2rad), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 37.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(-0.05, 2.5, time_, 0);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.26, 2.5, time_, -0.21);
+        r_r_des(2) = cosWave(-0.65, 2.5, time_, -0.75);
+
+        L_C_predes << cosWave(cos(0 * deg2rad), 2.5, time_, cos(30 * deg2rad)), cosWave(-sin(0 * deg2rad), 2.5, time_, -sin(30 * deg2rad)), 0, \
+                                cosWave(sin(0 * deg2rad), 2.5, time_, sin(30 * deg2rad)), cosWave(cos(0 * deg2rad), 2.5, time_, cos(30 * deg2rad)), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 40) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = -0.05;
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = -0.26;
+        r_r_des(2) = cosWave(-0.75, 2.5, time_, -0.65);
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Third Turn (same move as the first motion.)
+    else if (time <= 42.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.21, 2.5, time_, -0.05);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(0, 2.5, time_, -0.26);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 45) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.26, 2.5, time_, 0.21);
+        l_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(0.05, 2.5, time_, 0);
+        r_r_des(2) = -0.75;
+
+        L_C_predes << cosWave(cos(30 * deg2rad), 2.5, time_, cos(0)), cosWave(-sin(30 * deg2rad), 2.5, time_, -sin(0)), 0, \
+                                cosWave(sin(30 * deg2rad), 2.5, time_, sin(0)), cosWave(cos(30 * deg2rad), 2.5, time_, cos(0)), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 47.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0, 2.5, time_, 0.26);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.21, 2.5, time_, 0.05);
+        r_r_des(2) = -0.75;
+
+        L_C_predes << cos(30 * deg2rad), -sin(30 * deg2rad), 0, \
+                                sin(30 * deg2rad), cos(30 * deg2rad), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 50) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(-0.05, 2.5, time_, 0);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.26, 2.5, time_, -0.21);
+        r_r_des(2) = cosWave(-0.65, 2.5, time_, -0.75);
+
+        L_C_predes << cosWave(cos(0 * deg2rad), 2.5, time_, cos(30 * deg2rad)), cosWave(-sin(0 * deg2rad), 2.5, time_, -sin(30 * deg2rad)), 0, \
+                                cosWave(sin(0 * deg2rad), 2.5, time_, sin(30 * deg2rad)), cosWave(cos(0 * deg2rad), 2.5, time_, cos(30 * deg2rad)), 0, \
+                                0, 0, 1;
+
+        l_q_cal = inverseKinematics(l_r_des, L_C_predes, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 52.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = -0.05;
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = -0.26;
+        r_r_des(2) = cosWave(-0.75, 2.5, time_, -0.65);
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+        //Finished Turn
+        //Second Walking start
+    else if (time <= 55) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.21, 2.5, time_, -0.05);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(0, 2.5, time_, -0.26);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 57.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = cosWave(0.2, 2.5, time_, 0);
+        l_r_des(1) = 0.21;
+        l_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        r_r_des(0) = 0;
+        r_r_des(1) = 0;
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 60) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = cosWave(0, 2.5, time_, 0.2);
+        l_r_des(1) = cosWave(0, 2.5, time_, 0.21);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = cosWave(-0.2, 2.5, time_, 0);
+        r_r_des(1) = cosWave(-0.21, 2.5, time_, 0);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 62.5) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = 0;
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = cosWave(0, 2.5, time_, -0.2);
+        r_r_des(1) = -0.21;
+        r_r_des(2) = cosWave(-0.65, 1.25, time_, -0.75);
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else if (time <= 65) {
+        static double time_ = 0;
+        l_q_init = l_q_cal;
+        r_q_init = r_q_cal;
+
+        l_r_des(0) = 0;
+        l_r_des(1) = cosWave(0.105, 2.5, time_, 0);
+        l_r_des(2) = -0.75;
+
+        r_r_des(0) = 0;
+        r_r_des(1) = cosWave(-0.105, 2.5, time_, -0.21);
+        r_r_des(2) = -0.75;
+
+        l_q_cal = inverseKinematics(l_r_des, C_des, l_q_init, 0.001);
+        r_q_cal = inverseKinematics(r_r_des, C_des, r_q_init, 0.001, "right");
+        time_ = time_ + 0.001;
+        std::cout << "--------------------------------------------------------------------------------" << std::endl;
+        cout.precision(7);
+        std::cout << "L_Foot(X) : " << l_r_des(0) << " L_Foot(Y) : " << l_r_des(1) << " L_Foot(Z) : " << l_r_des(2) << std::endl;
+        std::cout << "R_Foot(X) : " << r_r_des(0) << " R_Foot(Y) : " << r_r_des(1) << " R_Foot(Z) : " << r_r_des(2) << std::endl << std::endl;
+        std::cout << "l_q_cal : " << std::endl << l_q_cal * rad2deg << std::endl;
+        std::cout << "r_q_cal : " << std::endl << r_q_cal * rad2deg << std::endl;
+    }
+
+    else {
+        printf(C_GREEN "Walking Finish \n" C_RESET);
+    }
     //practice 6 - 1
     // joint 0 to q_Cal to 0 each  for 5 sec
-    if (time < 5) {
-        joint[LHY].targetRadian = cosWave(q_cal(0), 5, time, 0);
-        joint[LHR].targetRadian = cosWave(q_cal(1), 5, time, 0);
-        joint[LHP].targetRadian = cosWave(q_cal(2), 5, time, 0);
-        joint[LKN].targetRadian = cosWave(q_cal(3), 5, time, 0);
-        joint[LAP].targetRadian = cosWave(q_cal(4), 5, time, 0);
-        joint[LAR].targetRadian = cosWave(q_cal(5), 5, time, 0);
 
+    if (time <= 5) {
+        joint[LHY].targetRadian = cosWave(l_q_cal(0), 5, time, 0);
+        joint[LHR].targetRadian = cosWave(l_q_cal(1), 5, time, 0);
+        joint[LHP].targetRadian = cosWave(l_q_cal(2), 5, time, 0);
+        joint[LKN].targetRadian = cosWave(l_q_cal(3), 5, time, 0);
+        joint[LAP].targetRadian = cosWave(l_q_cal(4), 5, time, 0);
+        joint[LAR].targetRadian = cosWave(l_q_cal(5), 5, time, 0);
+
+        joint[RHY].targetRadian = cosWave(r_q_cal(0), 5, time, 0);
+        joint[RHR].targetRadian = cosWave(r_q_cal(1), 5, time, 0);
+        joint[RHP].targetRadian = cosWave(r_q_cal(2), 5, time, 0);
+        joint[RKN].targetRadian = cosWave(r_q_cal(3), 5, time, 0);
+        joint[RAP].targetRadian = cosWave(r_q_cal(4), 5, time, 0);
+        joint[RAR].targetRadian = cosWave(r_q_cal(5), 5, time, 0);
     }
 
-    else if (time <= 10) {
-        double time_2 = time - 5.0;
+    else {
+        joint[LHY].targetRadian = l_q_cal(0);
+        joint[LHR].targetRadian = l_q_cal(1);
+        joint[LHP].targetRadian = l_q_cal(2);
+        joint[LKN].targetRadian = l_q_cal(3);
+        joint[LAP].targetRadian = l_q_cal(4);
+        joint[LAR].targetRadian = l_q_cal(5);
 
-        joint[LHY].targetRadian = cosWave(q_cal(0)-q_init(0), 5, time_2, q_init(0));
-        joint[LHR].targetRadian = cosWave(q_cal(1)-q_init(1), 5, time_2, q_init(1));
-        joint[LHP].targetRadian = cosWave(q_cal(2)-q_init(2), 5, time_2, q_init(2));
-        joint[LKN].targetRadian = cosWave(q_cal(3)-q_init(3), 5, time_2, q_init(3));
-        joint[LAP].targetRadian = cosWave(q_cal(4)-q_init(4), 5, time_2, q_init(4));
-        joint[LAR].targetRadian = cosWave(q_cal(5)-q_init(5), 5, time_2, q_init(5));
-
+        joint[RHY].targetRadian = r_q_cal(0);
+        joint[RHR].targetRadian = r_q_cal(1);
+        joint[RHP].targetRadian = r_q_cal(2);
+        joint[RKN].targetRadian = r_q_cal(3);
+        joint[RAP].targetRadian = r_q_cal(4);
+        joint[RAR].targetRadian = r_q_cal(5);
     }
-    else if (time <= 15) {
-        double time_3 = time - 10.0;
-
-        joint[LHY].targetRadian = cosWave(q_cal(0)-q_init(0), 5, time_3, q_init(0));
-        joint[LHR].targetRadian = cosWave(q_cal(1)-q_init(1), 5, time_3, q_init(1));
-        joint[LHP].targetRadian = cosWave(q_cal(2)-q_init(2), 5, time_3, q_init(2));
-        joint[LKN].targetRadian = cosWave(q_cal(3)-q_init(3), 5, time_3, q_init(3));
-        joint[LAP].targetRadian = cosWave(q_cal(4)-q_init(4), 5, time_3, q_init(4));
-        joint[LAR].targetRadian = cosWave(q_cal(5)-q_init(5), 5, time_3, q_init(5));
-
-    }
-
 
 
     //* Joint Controller
+    ROSMsgPublish();
     jointController();
+}
+
+void gazebo::rok3_plugin::ROSMsgPublish(void)
+{
+    l_r_des_z.data[0] = l_r_des(2);
+    L_R_DES_Z.publish(l_r_des_z);
 }
 
 void gazebo::rok3_plugin::jointController()
@@ -941,12 +1790,15 @@ void gazebo::rok3_plugin::SetJointPIDgain()
     /*
      * Set each joint PID gain for joint control
      */
-    joint[LHY].Kp = 2000;
-    joint[LHR].Kp = 9000;
-    joint[LHP].Kp = 2000;
-    joint[LKN].Kp = 5000;
-    joint[LAP].Kp = 3000;
-    joint[LAR].Kp = 3000;
+    static double gain_p = 2.5;
+    static double gain_d = 1.5;
+
+    joint[LHY].Kp = 2000 * gain_p;
+    joint[LHR].Kp = 9000 * gain_p;
+    joint[LHP].Kp = 2000 * gain_p;
+    joint[LKN].Kp = 5000 * gain_p;
+    joint[LAP].Kp = 3000 * gain_p;
+    joint[LAR].Kp = 3000 * gain_p;
 
     joint[RHY].Kp = joint[LHY].Kp;
     joint[RHR].Kp = joint[LHR].Kp;
@@ -957,12 +1809,12 @@ void gazebo::rok3_plugin::SetJointPIDgain()
 
     joint[WST].Kp = 2.;
 
-    joint[LHY].Kd = 2.;
-    joint[LHR].Kd = 2.;
-    joint[LHP].Kd = 2.;
-    joint[LKN].Kd = 4.;
-    joint[LAP].Kd = 2.;
-    joint[LAR].Kd = 2.;
+    joint[LHY].Kd = 2. * gain_d;
+    joint[LHR].Kd = 2. * gain_d;
+    joint[LHP].Kd = 2. * gain_d;
+    joint[LKN].Kd = 4. * gain_d;
+    joint[LAP].Kd = 2. * gain_d;
+    joint[LAR].Kd = 2. * gain_d;
 
     joint[RHY].Kd = joint[LHY].Kd;
     joint[RHR].Kd = joint[LHR].Kd;
